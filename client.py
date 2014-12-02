@@ -1,34 +1,5 @@
-#!/usr/bin/env python
-# /* -*-  indent-tabs-mode:t; tab-width: 8; c-basic-offset: 8  -*- */
-# /*
-# Copyright (c) 2013, Daniel M. Lofaro
-# All rights reserved.
-#
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions are met:
-#     * Redistributions of source code must retain the above copyright
-#       notice, this list of conditions and the following disclaimer.
-#     * Redistributions in binary form must reproduce the above copyright
-#       notice, this list of conditions and the following disclaimer in the
-#       documentation and/or other materials provided with the distribution.
-#     * Neither the name of the author nor the names of its contributors may
-#       be used to endorse or promote products derived from this software
-#       without specific prior written permission.
-# 
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
-# ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
-# WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-# DISCLAIMED. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
-# INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-# LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
-# PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
-# LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
-# OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
-# ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-#
-# Based on: https://github.com/thedancomplex/pydynamixel
-# */
-
+import sys
+sys.path.append('/home/archr/hubo_simulation/files/dynamixel')
 import os
 import dynamixel
 import serial_stream
@@ -41,9 +12,12 @@ import yaml
 import dynamixel_network
 import numpy as np
 from ovrsdk import *
+import socket
+import thread
+import math
 
 #############################################################################################
-##	Radian to Dynamixel conversion functions
+##    Radian to Dynamixel conversion functions
 def rad2dyn(rad):
     return np.int(np.floor( (rad + np.pi)/(2.0 * np.pi) * 1023 ))
 
@@ -51,85 +25,88 @@ def dyn2rad(en):
     return ((en*2.0*np.pi)/1024) - np.pi
 
 ##############################################################################################
+#global
+#open a link to the server
+x=1
+host = '192.168.0.111'    #this is the computers current IP
+port = 21111          #this is just a random port number
+server = ('192.168.0.102',20000)    #tells the computer where to listen and send
+s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)    #tells to use network/udp
+while (x == 1):            #this makes it so that if a port is taken it will try for a new port
+    try:
+        print port
+        s.bind((host, port))    #trys this port if it is taken then moves on to a new port
+        x=0
+    except IOError:
+        port+=1
+    else:
+        port+=1
 
 
 def main(settings):
-    
-    # Establish a serial connection to the dynamixel network.
-    # This usually requires a USB2Dynamixel
-    portName = settings['port']
-    baudRate = settings['baudRate']
-    highestServoId = settings['highestServoId']
+    portName = settings['port']        #searches for a usb2dyn
+    baudRate = 1000000             #this is set to max can be changed to =>settings['baudRate']<= to be asked for a speed
+    highestServoId = settings['highestServoId']#asked for highest servo id
     seriall = serial_stream.SerialStream(port=portName, baudrate=baudRate, timeout=1)
-    net = dynamixel_network.DynamixelNetwork(seriall)
-
-    # Ping the range of servos that are attached
+    net = dynamixel_network.DynamixelNetwork(seriall) # Ping the range of servos that are attached
     print "Scanning for Dynamixels..."
-    net.scan(1, highestServoId)
+    net.scan(1, highestServoId)        #scans for all attached servos
     
-    myActuators = []
-    for dyn in net.get_dynamixels():
+    myActuators = []            #starts a list
+    for dyn in net.get_dynamixels():    #makes a list of all dyn's
         print dyn.id
         myActuators.append(net[dyn.id])
     
-    if not myActuators:
+    if not myActuators:            #if the list has nothing show error
       print 'No Dynamixels Found!'
       sys.exit(0)
-    else:
+    else:                #if it found some it prints done
       print "...Done"
-    
-    for actuator in myActuators:
+    for actuator in myActuators:    #this is just an initializing loop to tell the servos to move as fast as we want
         actuator.moving_speed = 1023
         actuator.synchronized = True
         actuator.torque_enable = True
+    actuator._set_torque_limit(0)
 
-    #ovr_Initialize()
-    #hmd = ovrHmd_Create(0)
-    #hmdDesc = ovrHmdDesc()
-    #ovrHmd_GetDesc(hmd, byref(hmdDesc))
-    #ovrHmd_StartSensor( \
-	#hmd, 
-	#ovrSensorCap_Orientation | 
-	#ovrSensorCap_YawCorrection, 
-	#0
-    #)
-    while True:	
+    ovr_Initialize()            #this part is form the oculus rift(OR) sdk this gets the pan and tilt
+    hmd = ovrHmd_Create(0)
+    hmdDesc = ovrHmdDesc()
+    ovrHmd_GetDesc(hmd, byref(hmdDesc))
+    ovrHmd_StartSensor(hmd,ovrSensorCap_Orientation | ovrSensorCap_YawCorrection,0)#end this part of OR code
+    while True:    #the main part of our code
         actuator.read_all()
-	#ss = ovrHmd_GetSensorState(hmd, ovr_GetTimeInSeconds())
-	#pose = ss.Predicted.Pose
-        #time.sleep(0.016)
-    	#tilt = rad2dyn(pose.Orientation.x*np.pi);
-    	#myActuators[12]._set_goal_position(tilt);
-    	#pan = rad2dyn(pose.Orientation.y*np.pi);
-    	#myActuators[11]._set_goal_position(pan);
-	for actuator in myActuators:
-            if ( actuator.id == 21):
-                myActuators[0]._set_goal_position(actuator.current_position)
-            if ( actuator.id == 22):
-                myActuators[1]._set_goal_position(actuator.current_position)
-            if ( actuator.id == 23):
-                myActuators[2]._set_goal_position(actuator.current_position)
-            if ( actuator.id == 24):
-                myActuators[3]._set_goal_position(actuator.current_position)
-            if ( actuator.id == 25):
-                myActuators[4]._set_goal_position(actuator.current_position)
-            if ( actuator.id == 26):
-                myActuators[5]._set_goal_position(actuator.current_position)
-            if ( actuator.id == 27):
-                myActuators[6]._set_goal_position(actuator.current_position)
-            if ( actuator.id == 28):
-                myActuators[7]._set_goal_position(actuator.current_position)
-            if ( actuator.id == 29):
-                myActuators[8]._set_goal_position(actuator.current_position)
-            if ( actuator.id == 30):
-                myActuators[9]._set_goal_position(actuator.current_position)
-            if ( actuator.id == 31):
-                myActuators[10]._set_goal_position(actuator.current_position)
-	net.synchronize()
+        ss = ovrHmd_GetSensorState(hmd, ovr_GetTimeInSeconds())#more OR code
+        pose = ss.Predicted.Pose
+        tilt = rad2dyn(pose.Orientation.x*np.pi);                #gets tilt
+        pan = rad2dyn(pose.Orientation.y*np.pi);                #gets pan
+        pos = ''                    #this is the start of a string because that is how info is sent over the network
+        for actuator in myActuators:                           #loop for actuators
+               pos = pos + str(actuator._get_current_position()) + ' '     #adds the current position to the string we made
+        pos = pos + str(pan) + ' ' + str(tilt)                    #adds the pan and tilt to the end of the list
+        pos.join(' ')                                #adds a space at the end
+#print 'sent', pos
+        s.sendto(pos, server)                            #sends the string made above
+        data, addr = s.recvfrom(1024)                        #waits to get back the current psoition and load
+#print data
+        data=data.split()                            #this splits the string into a list
+        counter=0                                #just a counter
+        for actuator in myActuators:                        #loop for out actuators
+   #time.sleep(1)
+   #print actuator.id 
+            if(abs(int(data[counter+1])) < 180):     
+       #actuator._set_torque_limit(0)                #this makes it so we dont feel feedback
+            else:                                #this makes it feel feedback
+                actuator._set_torque_limit(int(data[counter+1]))    
+                actuator._set_goal_position(int(data[counter]))        
+            counter+=2                            #this counts through the list of servos coming in
+            if counter==len(data):                        #breaks the for loop if needs to
+                break
+        net.synchronize()                            #sends the information to each servo to update
 
 
+    #return None
 
-def validateInput(userInput, rangeMin, rangeMax):
+def validateInput(userInput, rangeMin, rangeMax):                #setting up from here down
     '''
     Returns valid user input or None
     '''
@@ -218,4 +195,3 @@ if __name__ == '__main__':
         #           "this example with -c.")
     
     main(settings)
-

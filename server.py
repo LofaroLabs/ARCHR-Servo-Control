@@ -29,6 +29,8 @@
 # Based on: https://github.com/thedancomplex/pydynamixel
 # */
 
+import sys
+sys.path.append('/home/archr/hubo_simulation/files/dynamixel')
 import os
 import dynamixel
 import serial_stream
@@ -40,90 +42,78 @@ import optparse
 import yaml
 import dynamixel_network
 import numpy as np
-from ovrsdk import *
+import socket
 
-
-
-
+#############################################################################################
+##	Radian to Dynamixel conversion functions
 def rad2dyn(rad):
     return np.int(np.floor( (rad + np.pi)/(2.0 * np.pi) * 1023 ))
 
 def dyn2rad(en):
     return ((en*2.0*np.pi)/1024) - np.pi
 
-def main(settings):
-    
-    portName = settings['port']
-    baudRate = settings['baudRate']
-    highestServoId = settings['highestServoId']
+##############################################################################################
 
+
+def main(settings):
+    #start server
+    host = '192.168.0.102'		#gets comp ip address
+    port = 20000						#random port
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)	#tells udp
+    s.bind((str(host), port))					#binds it
+    print str(s.bind)
+    print "Server Started."
+    #highestServoId, addr = s.recvfrom(1024)			#receves number of servos per robot
+    
     # Establish a serial connection to the dynamixel network.
     # This usually requires a USB2Dynamixel
-    serial = serial_stream.SerialStream(port=portName, baudrate=baudRate, timeout=1)
-    net = dynamixel_network.DynamixelNetwork(serial)
-    
+    portName = settings['port']				#pick the usb to dyn port
+    baudRate = settings['baudRate']			
+    highestServoId = settings['highestServoId']
+    seriall = serial_stream.SerialStream(port=portName, baudrate=baudRate, timeout=1)
+    net = dynamixel_network.DynamixelNetwork(seriall)
+
     # Ping the range of servos that are attached
     print "Scanning for Dynamixels..."
-    net.scan(1, highestServoId)
-    
-    myActuators = []
-    for dyn in net.get_dynamixels():
+    net.scan(1, highestServoId)				#scans for dyns
+    ST=[]						#start torque for the servos
+    myActuators = []					#list with all the dynamixels
+    for dyn in net.get_dynamixels():			#loop puts the dyns in the list
         print dyn.id
         myActuators.append(net[dyn.id])
     
-    if not myActuators:
+    if not myActuators:					#if no dyns were found print none found
       print 'No Dynamixels Found!'
       sys.exit(0)
     else:
       print "...Done"
     
-    for actuator in myActuators:
-        actuator.moving_speed = 1023
+    for actuator in myActuators:			#loop for initializing dyns
+        actuator.moving_speed = 250			#makes the robot move at this speed
         actuator.synchronized = True
         actuator.torque_enable = True
-
-    ovr_Initialize()
-    hmd = ovrHmd_Create(0)
-    hmdDesc = ovrHmdDesc()
-    ovrHmd_GetDesc(hmd, byref(hmdDesc))
-    ovrHmd_StartSensor( \
-	hmd, 
-	ovrSensorCap_Orientation | 
-	ovrSensorCap_YawCorrection, 
-	0
-    )
+	ST.append(abs(actuator._get_current_load()))	#gets the initial load of a servo
+	
+    print 'waiting'
 
     while True:
-        actuator.read_all()
-	ss = ovrHmd_GetSensorState(hmd, ovr_GetTimeInSeconds())
-	pose = ss.Predicted.Pose
-        time.sleep(0.016)
-	for actuator in myActuators:
-            if ( actuator.id == 11):
-                myActuators[0]._set_goal_position(actuator.current_position)
-            #if ( actuator.id == 12):
-		#yaw = rad2dyn(pose.Orientation.z*-np.pi);
-                #myActuators[0]._set_goal_position(yaw);
-            if ( actuator.id == 13):
-		tilt = rad2dyn(pose.Orientation.x*np.pi);
-                myActuators[1]._set_goal_position(tilt);
-            if ( actuator.id == 14):
-		pan = rad2dyn(pose.Orientation.y*np.pi);
-                myActuators[2]._set_goal_position(pan);
-            if ( actuator.id == 15):
-                myActuators[4]._set_goal_position(actuator.current_position)
-            if ( actuator.id == 16):
-                myActuators[5]._set_goal_position(actuator.current_position)
-            if ( actuator.id == 17):
-                myActuators[6]._set_goal_position(actuator.current_position)
-            if ( actuator.id == 18):
-                myActuators[7]._set_goal_position(actuator.current_position)
-            if ( actuator.id == 19):
-                myActuators[8]._set_goal_position(actuator.current_position)
-            if ( actuator.id == 20):
-                myActuators[9]._set_goal_position(actuator.current_position)
-	    net.synchronize()
-
+        counter=0					#counts through the list below
+        data, addr = s.recvfrom(1024)			#gets positions from the client
+        data = data.split()				# splits the string at spaces
+        for actuator in myActuators:			#assigns the positions to the servos
+	    actuator._set_goal_position(int(data[counter]))
+            counter+=1
+	pos = ''					#preps a str to start sending info back
+	pos = str(pos)					#i dont think this needs to be here
+	counter=0					#counter to count through the initial loads
+	for actuator in myActuators:			#str to send back data
+   		pos = pos + str(actuator._get_current_position()) + ' ' #gets current position
+		pos = pos + str(abs(actuator._get_current_load())) + ' '	# gets current load -initial load
+		counter+=1
+	pos.join(' ')					#adds another space at the end
+	s.sendto(pos, addr)				#sends the str to the client
+        net.synchronize()				#sets all the positions of the servos connected to the server
+    c.close()
 
 def validateInput(userInput, rangeMin, rangeMax):
     '''
@@ -207,11 +197,11 @@ if __name__ == '__main__':
         settings['highestServoId'] = highestServoId
         
         # Save the output settings to a yaml file
-        with open(settingsFile, 'w') as fh:
-            yaml.dump(settings, fh)
-            print("Your settings have been saved to 'settings.yaml'. \nTo " +
-                   "change them in the future either edit that file or run " +
-                   "this example with -c.")
+        #with open(settingsFile, 'w') as fh:
+        #    yaml.dump(settings, fh)
+        #    print("Your settings have been saved to 'settings.yaml'. \nTo " +
+        #           "change them in the future either edit that file or run " +
+        #           "this example with -c.")
     
     main(settings)
 
